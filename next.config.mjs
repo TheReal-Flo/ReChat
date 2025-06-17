@@ -1,3 +1,4 @@
+import MillionLint from '@million/lint';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -29,5 +30,3 @@ const nextConfig = {
   // Explicitly mark server-only packages
   serverComponentsExternalPackages: ['pg', 'ioredis']
 }
-
-export default nextConfig

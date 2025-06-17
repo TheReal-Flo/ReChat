@@ -1,8 +1,8 @@
-import { useState } from "react"
+import React, { memo, useState, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, Plus, Trash2, Settings as SettingsIcon, X } from "lucide-react"
+import { Search, Plus, Trash2, Settings as SettingsIcon, X, Pin } from "lucide-react"
 import type { Chat } from "../types/chat"
 import { TypewriterText } from "./TypewriterText"
 import { Settings } from "./Settings"
@@ -16,12 +16,13 @@ interface ChatSidebarProps {
   onSelectChat: (chat: Chat) => void
   onNewChat: () => void
   onDeleteChat: (chatId: string) => void
+  onTogglePin: (chatId: string) => void
   isLoading: boolean
   isSidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
 }
 
-export function ChatSidebar({
+const ChatSidebar = memo(function ChatSidebar({
   chats,
   selectedChat,
   searchQuery,
@@ -29,6 +30,7 @@ export function ChatSidebar({
   onSelectChat,
   onNewChat,
   onDeleteChat,
+  onTogglePin,
   isLoading,
   isSidebarOpen,
   setSidebarOpen
@@ -36,8 +38,10 @@ export function ChatSidebar({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const { isSignedIn, user } = useUser();
   
-  const filteredChats = chats.filter((chat) => 
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredChats = useMemo(() => 
+    chats.filter((chat) => 
+      chat.title.toLowerCase().includes(searchQuery.toLowerCase())
+    ), [chats, searchQuery]
   )
 
   return (
@@ -60,7 +64,7 @@ export function ChatSidebar({
           </Button>
         </div>
         <Button 
-          onClick={onNewChat}
+          onClick={() => onNewChat()}
           className="w-full bg-teal-600 hover:bg-teal-700 text-white shadow-[0_3px_10px_rgb(0,0,0,0.2)]"
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -76,7 +80,7 @@ export function ChatSidebar({
             placeholder="Search your threads..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-transparent border-b border-t-0 border-l-0 border-r-0 border-gray-400 rounded-none text-white placeholder-gray-400 focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
+            className="pl-10 bg-transparent border-b border-t-0 border-l-0 border-r-0 border-gray-400 rounded-none text-white placeholder-gray-400 focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0 focus:!border-b-2"
           />
         </div>
       </div>
@@ -101,18 +105,31 @@ export function ChatSidebar({
                   }`}
                   onClick={() => onSelectChat(chat)}
                 >
-                  <div className="text-sm font-medium text-white truncate max-w-[85%]">
+                  <div className="flex items-center gap-1 text-sm font-medium text-white truncate max-w-[70%]">
+                    {chat.pinned && <Pin className="h-3 w-3 text-teal-400 flex-shrink-0" />}
                     <TypewriterText text={chat.title} speed={30} />
                   </div>
-                  <Button
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeleteChat(chat.id)
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      className="h-6 w-6 p-0 text-gray-400 hover:text-teal-400 hover:bg-teal-500/10"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onTogglePin(chat.id)
+                      }}
+                      title={chat.pinned ? "Unpin chat" : "Pin chat"}
+                    >
+                      <Pin className={`h-3 w-3 ${chat.pinned ? 'fill-current' : ''}`} />
+                    </Button>
+                    <Button
+                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteChat(chat.id)
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </div>
               ))}
 
@@ -128,18 +145,31 @@ export function ChatSidebar({
                       }`}
                       onClick={() => onSelectChat(chat)}
                     >
-                      <div className="text-sm text-gray-300 truncate max-w-[85%]">
+                      <div className="flex items-center gap-1 text-sm text-gray-300 truncate max-w-[70%]">
+                        {chat.pinned && <Pin className="h-3 w-3 text-teal-400 flex-shrink-0" />}
                         <TypewriterText text={chat.title} speed={30} />
                       </div>
-                      <Button
-                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDeleteChat(chat.id)
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          className="h-6 w-6 p-0 text-gray-400 hover:text-teal-400 hover:bg-teal-500/10"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onTogglePin(chat.id)
+                          }}
+                          title={chat.pinned ? "Unpin chat" : "Pin chat"}
+                        >
+                          <Pin className={`h-3 w-3 ${chat.pinned ? 'fill-current' : ''}`} />
+                        </Button>
+                        <Button
+                          className="h-6 w-6 p-0 text-gray-400 hover:text-red-400 hover:bg-red-500/10"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteChat(chat.id)
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -181,4 +211,6 @@ export function ChatSidebar({
       />
     </div>
   )
-}
+})
+
+export { ChatSidebar }

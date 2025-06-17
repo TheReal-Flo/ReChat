@@ -1,4 +1,5 @@
-import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import React, { memo, useState, useEffect } from "react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,24 +13,23 @@ import {
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ChevronDown, X, File, Image, Palette } from "lucide-react"
+import { ArrowUp, ChevronDown, X, File, Image } from "lucide-react"
 import type { Chat } from "../types/chat"
-import { useState, useEffect } from "react"
 import { FileUploadDialog } from "./FileUploadDialog"
 
 interface MessageInputProps {
   message: string
   setMessage: (message: string) => void
+  onSendMessage: () => void
   selectedChat: Chat | null
   selectedModel: string
   setSelectedModel: (model: string) => void
   isStreaming: boolean
-  onSendMessage: () => void
-  onGenerateImage: () => void
+  isSending: boolean
   onKeyPress: (e: React.KeyboardEvent) => void
   attachments: { name: string; type: string; url: string }[]
   onAttachmentsChange: (attachments: { name: string; type: string; url: string }[]) => void
-  user: any // Add user prop for authentication check
+  user: any
 }
 
 interface AIModel {
@@ -59,15 +59,15 @@ const aiModels: AIModel[] = [
   { name: "Llama 3.3 8B", value: "llama-3.3-free", provider: "Free" },
 ]
 
-export function MessageInput({
+const MessageInput = memo(function MessageInput({
   message,
   setMessage,
   selectedChat,
   selectedModel,
   setSelectedModel,
   isStreaming,
+  isSending,
   onSendMessage,
-  onGenerateImage,
   onKeyPress,
   attachments,
   onAttachmentsChange,
@@ -126,17 +126,28 @@ export function MessageInput({
 
   return (
     <div className="absolute bottom-0 left-0 right-0 flex justify-center w-full bg-gradient-to-t from-gray-900 via-gray-900 to-transparent pt-10 pb-6 px-4 md:px-0">
-      <div className="max-w-full md:max-w-[50%] w-full md:w-[50%] rounded-xl p-1 bg-[conic-gradient(at_left,_var(--tw-gradient-stops))] from-teal-400 to-cyan-400 shadow-[5px_5px_30px_10px_#ffffff20]">
-        <div className="bg-gray-800 rounded-lg !shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]">
+      <div className="max-w-full md:max-w-[50%] w-full md:w-[50%] rounded-xl p-1 bg-[conic-gradient(at_left,_var(--tw-gradient-stops))] from-teal-400 to-cyan-400 shadow-[5px_5px_30px_10px_#ffffff20] glow-border transition-all duration-300">
+        <div className="bg-gradient-to-br from-gray-800/90 to-gray-900/90 rounded-lg !shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)] backdrop-blur-sm border border-gray-700/30">
           <div className="mx-auto space-y-3 p-3">
             <div className="relative">
-              <Input
+              <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={onKeyPress}
                 placeholder={!user ? "Please sign in to use AI chat..." : "Type your message here..."}
-                className="bg-transparent border-none !text-lg text-white placeholder-gray-200 min-h-[50px] focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
+                className="bg-transparent border-none !text-lg text-white placeholder-gray-200 min-h-[50px] max-h-[150px] resize-none focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0 overflow-y-auto custom-scrollbar"
                 disabled={!selectedChat || !user}
+                rows={1}
+                style={{
+                  height: 'auto',
+                  minHeight: '50px',
+                  maxHeight: '150px'
+                }}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = 'auto';
+                  target.style.height = Math.min(target.scrollHeight, 150) + 'px';
+                }}
               />
             </div>
 
@@ -244,22 +255,11 @@ export function MessageInput({
                   onFilesSelected={handleFilesSelected}
                   disabled={!selectedChat || !user}
                 />
-                
-                <Button
-                  onClick={onGenerateImage}
-                  disabled={!message.trim() || !selectedChat || isStreaming || !user}
-                  variant="ghost"
-                  size="sm"
-                  className="text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors duration-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={!user ? "Please sign in to generate images" : "Generate Image"}
-                >
-                  <Palette className="w-4 h-4" />
-                </Button>
               </div>
               <Button 
                 onClick={onSendMessage}
-                disabled={!message.trim() || !selectedChat || isStreaming || !user}
-                className="bg-teal-600 hover:bg-teal-700 transition-colors duration-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!message.trim() || !selectedChat || isStreaming || isSending || !user}
+                className="bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 transition-all duration-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-teal-500/25 glow-border-blue"
                 title={!user ? "Please sign in to send messages" : "Send message"}
               >
                 {isStreaming ? (
@@ -274,4 +274,6 @@ export function MessageInput({
       </div>
     </div>
   )
-}
+})
+
+export { MessageInput }

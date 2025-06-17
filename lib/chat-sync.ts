@@ -1,4 +1,6 @@
-// Server-side imports - only available in Node.js environment
+import type { Chat, Message, SyncSettings, SyncStatus } from '../types/chat'
+
+// Conditional imports for server-side only
 let Pool: any, Redis: any, pool: any, redis: any
 
 if (typeof window === 'undefined') {
@@ -22,8 +24,6 @@ if (typeof window === 'undefined') {
   console.warn('[SYNC] Server-side modules not available on client')
 }
 
-import type { Chat, Message } from '../types/chat'
-
 // Conditional import for database service
 let chatService: any, db: any
 if (typeof window !== 'undefined') {
@@ -33,80 +33,193 @@ if (typeof window !== 'undefined') {
   db = database.db
 }
 
-// Pool and Redis connections are initialized above conditionally
-
-export interface SyncStatus {
-  lastSyncTimestamp: Date
-  pendingChanges: number
-  isOnline: boolean
-}
-
 export class ChatSyncService {
+  private static syncInterval: NodeJS.Timeout | null = null
+  private static isInitialized = false
+  private static pendingUploads = new Set<string>()
+  private static lastSyncTime = 0
+  private static syncDebounceMs = 1000 // Minimum time between syncs
+
   // Check if running on server
   private static isServer(): boolean {
     return typeof window === 'undefined'
   }
 
-  // Upload local chats to server
-  static async syncToServer(userId: string): Promise<void> {
-    // This method should run on client side to access IndexedDB
+  // Get sync settings from localStorage
+  static getSyncSettings(): SyncSettings {
     if (this.isServer()) {
-      throw new Error('syncToServer must be called on the client side to access local database')
+      return { enabled: false, autoUpload: false, downloadInterval: 30 }
     }
     
-    if (!chatService || !db) {
-      throw new Error('Local database not available')
+    const settings = localStorage.getItem('sync_settings')
+    if (settings) {
+      try {
+        return JSON.parse(settings)
+      } catch (e) {
+        console.warn('[SYNC] Failed to parse sync settings, using defaults')
+      }
     }
-    if (!userId) {
-      throw new Error('User ID is required for syncing')
+    
+    // Default settings
+    return {
+      enabled: false, // Opt-in by default
+      autoUpload: true,
+      downloadInterval: 30 // seconds
     }
+  }
 
-    // Get all local chats from IndexedDB
-    const localChats = await chatService.getAllChats()
+  // Save sync settings to localStorage
+  static setSyncSettings(settings: SyncSettings): void {
+    if (this.isServer()) return
     
-    if (localChats.length === 0) {
-      console.log('[SYNC] No local chats to upload')
+    localStorage.setItem('sync_settings', JSON.stringify(settings))
+    
+    // Restart sync with new settings
+    if (settings.enabled) {
+      this.startAutoSync()
+    } else {
+      this.stopAutoSync()
+    }
+  }
+
+  // Initialize sync system
+  static async initialize(userId?: string): Promise<void> {
+    if (this.isServer() || this.isInitialized) return
+    
+    const settings = this.getSyncSettings()
+    if (!settings.enabled || !userId) {
+      console.log('[SYNC] Sync disabled or no user ID')
       return
     }
     
-    console.log(`[SYNC] Uploading ${localChats.length} local chats to server`)
+    this.isInitialized = true
+    console.log('[SYNC] Initializing sync system')
     
-    // Send chats to server via API
-    const response = await fetch('/api/sync/upload', {
+    // Start auto-sync
+    this.startAutoSync(userId)
+  }
+
+  // Start automatic sync
+  static startAutoSync(userId?: string): void {
+    if (this.isServer()) return
+    
+    const settings = this.getSyncSettings()
+    if (!settings.enabled) return
+    
+    // Clear existing interval
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval)
+    }
+    
+    // Start periodic downloads
+    this.syncInterval = setInterval(async () => {
+      if (userId) {
+        try {
+          await this.downloadFromServer(userId)
+          // Trigger UI refresh after successful sync
+          this.notifyUIRefresh()
+        } catch (error) {
+          console.error('[SYNC] Auto-download failed:', error)
+        }
+      }
+    }, settings.downloadInterval * 1000)
+    
+    console.log(`[SYNC] Auto-sync started with ${settings.downloadInterval}s interval`)
+  }
+
+  // Stop automatic sync
+  static stopAutoSync(): void {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval)
+      this.syncInterval = null
+      console.log('[SYNC] Auto-sync stopped')
+    }
+  }
+
+  // Notify UI to refresh after sync
+  private static notifyUIRefresh(): void {
+    // Dispatch custom event to notify UI components
+    if (typeof window !== 'undefined') {
+      const event = new CustomEvent('chatSyncComplete', {
+        detail: { timestamp: new Date() }
+      })
+      window.dispatchEvent(event)
+      console.log('[SYNC] UI refresh event dispatched')
+    }
+  }
+
+  // Upload changes after message (called after every message)
+  static async uploadAfterMessage(chatId: string, userId: string): Promise<void> {
+    if (this.isServer()) return
+    
+    const settings = this.getSyncSettings()
+    if (!settings.enabled || !settings.autoUpload) return
+    
+    // Debounce rapid sync operations
+    const now = Date.now()
+    if (now - this.lastSyncTime < this.syncDebounceMs) {
+      console.log(`[SYNC] Debouncing sync for chat ${chatId}`)
+      return
+    }
+    this.lastSyncTime = now
+    
+    // Prevent duplicate uploads for the same chat
+    if (this.pendingUploads.has(chatId)) {
+      console.log(`[SYNC] Upload already pending for chat ${chatId}`)
+      return
+    }
+    
+    this.pendingUploads.add(chatId)
+    
+    try {
+      await this.uploadChatToServer(chatId, userId)
+      console.log(`[SYNC] Successfully uploaded chat ${chatId}`)
+    } catch (error) {
+      console.error(`[SYNC] Failed to upload chat ${chatId}:`, error)
+    } finally {
+      this.pendingUploads.delete(chatId)
+    }
+  }
+
+  // Upload a specific chat to server
+  static async uploadChatToServer(chatId: string, userId: string): Promise<void> {
+    if (this.isServer() || !chatService || !db) {
+      throw new Error('uploadChatToServer must be called on the client side')
+    }
+    
+    const localChat = await chatService.getChatById(chatId)
+    if (!localChat) {
+      throw new Error(`Chat ${chatId} not found locally`)
+    }
+    
+    const response = await fetch('/api/sync/upload-chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        chats: localChats
+        chat: localChat,
+        userId
       })
     })
     
     if (!response.ok) {
       const error = await response.text()
-      throw new Error(`Failed to upload chats: ${error}`)
+      throw new Error(`Failed to upload chat: ${error}`)
     }
     
-    const result = await response.json()
-    console.log('[SYNC] Upload completed:', result)
+    // Update lastSyncedAt timestamp
+    const now = new Date()
+    await db.chats.update(chatId, { lastSyncedAt: now })
   }
 
-  // Download server chats to local
-  static async syncFromServer(userId: string): Promise<void> {
-    // This method should run on client side to access IndexedDB
-    if (this.isServer()) {
-      throw new Error('syncFromServer must be called on the client side to access local database')
+  // Download changes from server
+  static async downloadFromServer(userId: string): Promise<boolean> {
+    if (this.isServer() || !chatService || !db) {
+      throw new Error('downloadFromServer must be called on the client side')
     }
     
-    if (!chatService || !db) {
-      throw new Error('Local database not available')
-    }
-    if (!userId) {
-      throw new Error('User ID is required for syncing')
-    }
-
-    // Get server chats via API
-    const response = await fetch('/api/sync/download', {
+    const response = await fetch(`/api/sync/download?userId=${userId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
@@ -122,268 +235,332 @@ export class ChatSyncService {
     
     if (!serverChats || serverChats.length === 0) {
       console.log('[SYNC] No server chats to download')
-      return
+      return false
     }
     
-    console.log(`[SYNC] Downloading ${serverChats.length} chats from server`)
+    console.log(`[SYNC] Processing ${serverChats.length} chats from server`)
     
-    for (const chat of serverChats) {
-      // Check if chat exists locally
-      const localChat = await chatService.getChatById(chat.id)
-      
-      if (!localChat) {
-        // Create new local chat
-        await this.createLocalChat(chat)
-      } else {
-        // Update local chat if server version is newer
-        const serverTimestamp = new Date(chat.updatedAt)
-        if (serverTimestamp > localChat.timestamp) {
-          await this.updateLocalChat(chat)
-        }
-      }
+    let hasChanges = false
+    for (const serverChat of serverChats) {
+      const changed = await this.mergeServerChat(serverChat)
+      if (changed) hasChanges = true
     }
     
     console.log('[SYNC] Download completed')
+    return hasChanges
   }
 
-  // Create a new local chat from server data
-  private static async createLocalChat(chat: Chat): Promise<void> {
-    // Create chat directly with server data
-    const chatWithMessages = {
-      ...chat,
-      messages: []
-    }
-    
-    // Add chat to database with server ID
-    await db.chats.add(chatWithMessages)
-
-    // Add messages with server data preserved (ID, timestamp, position)
-    for (const message of chat.messages) {
-      const messageWithChatId = {
-        ...message,
-        chatId: chat.id
+  // Merge server chat with local chat (local-first approach)
+  private static async mergeServerChat(serverChat: Chat): Promise<boolean> {
+    try {
+      const localChat = await chatService.getChatById(serverChat.id)
+      
+      if (!localChat) {
+        // No local version, create from server data
+        await this.createLocalChatFromServer(serverChat)
+        return true
       }
-      await db.messages.add(messageWithChatId)
-    }
-  }
-
-  // Update local chat with server data
-  private static async updateLocalChat(chat: Chat): Promise<void> {
-    // Update chat metadata
-    await chatService.updateChatTitle(chat.id, chat.title)
-    await db.chats.update(chat.id, {
-      timestamp: chat.timestamp,
-      parentChatId: chat.parentChatId,
-      branchFromMessageId: chat.branchFromMessageId,
-      branches: chat.branches
-    })
-
-    // Get current local messages
-    const localChat = await chatService.getChatById(chat.id)
-    const localMessageIds = new Set(localChat?.messages.map((m: Message) => m.id) || [])
-
-    // Add new messages from server
-    for (const message of chat.messages) {
-      if (!localMessageIds.has(message.id)) {
-        const messageWithChatId = {
-          ...message,
-          chatId: chat.id
-        }
-        await db.messages.add(messageWithChatId)
+      
+      // Local-first: Compare timestamps to determine which version is newer
+      const localUpdated = new Date(localChat.updatedAt)
+      const serverUpdated = new Date(serverChat.updatedAt)
+      
+      if (localUpdated > serverUpdated) {
+        // Local is newer, upload to server
+        console.log(`[SYNC] Local chat ${serverChat.id} is newer, will upload on next sync`)
+        return false
       }
+      
+      if (serverUpdated > localUpdated) {
+        // Server is newer, update local
+        console.log(`[SYNC] Server chat ${serverChat.id} is newer, updating local`)
+        await this.updateLocalChatFromServer(serverChat)
+        return true
+      }
+      
+      // Same timestamp, check if we need to sync messages
+      return await this.mergeMessages(serverChat)
+    } catch (error) {
+      console.error(`[SYNC] Error merging chat ${serverChat.id}:`, error)
+      // Don't throw to prevent breaking the entire sync process
+      return false
     }
   }
 
-  // Update sync timestamp without performing full sync
-  static async updateSyncTimestamp(userId: string): Promise<void> {
-    if (!this.isServer()) {
-      throw new Error('updateSyncTimestamp can only be called on the server side')
-    }
-    console.log('[SYNC DEBUG] Updating sync timestamp for user:', userId)
+  // Create local chat from server data
+  private static async createLocalChatFromServer(serverChat: Chat): Promise<void> {
+    console.log(`[SYNC] Creating local chat ${serverChat.id} from server`)
     
     try {
-      const now = new Date()
-      
-      // Update Redis cache
-      await redis.hset(`sync:${userId}`, {
-        lastSync: now.getTime().toString(),
-        updatedAt: now.getTime().toString()
+      await db.transaction('rw', db.chats, db.messages, async () => {
+        // Create chat without messages first
+        const chatWithoutMessages = {
+          ...serverChat,
+          messages: [],
+          lastSyncedAt: new Date()
+        }
+        
+        await db.chats.add(chatWithoutMessages)
+        
+        // Add messages
+        for (const message of serverChat.messages) {
+          const messageWithChatId = {
+            ...message,
+            chatId: serverChat.id,
+            timestamp: new Date(message.timestamp),
+            createdAt: new Date(message.createdAt),
+            updatedAt: new Date(message.updatedAt)
+          }
+          await db.messages.add(messageWithChatId)
+        }
       })
-      
-      // Update database
-      const client = await pool.connect()
-      try {
-        await client.query(
-          'INSERT INTO sync_status (user_id, last_sync_timestamp, created_at, updated_at) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO UPDATE SET last_sync_timestamp = $2, updated_at = $4',
-          [userId, now, now, now]
-        )
-        console.log('[SYNC DEBUG] Sync timestamp updated successfully')
-      } finally {
-        client.release()
-      }
+      console.log(`[SYNC] Successfully created local chat ${serverChat.id}`)
     } catch (error) {
-      console.error('[SYNC DEBUG] Error updating sync timestamp:', error)
+      console.error(`[SYNC] Error creating local chat ${serverChat.id}:`, error)
       throw error
     }
   }
 
-  // Get sync status for a user
-  static async getSyncStatus(userId: string): Promise<SyncStatus> {
-    if (!this.isServer()) {
-      throw new Error('getSyncStatus can only be called on the server side')
-    }
-    console.log('[SYNC DEBUG] Getting sync status for user:', userId)
+  // Update local chat from server data
+  private static async updateLocalChatFromServer(serverChat: Chat): Promise<boolean> {
+    console.log(`[SYNC] Updating local chat ${serverChat.id} from server`)
     
+    // Update chat metadata
+    await db.chats.update(serverChat.id, {
+      title: serverChat.title,
+      timestamp: new Date(serverChat.timestamp),
+      parentChatId: serverChat.parentChatId,
+      branchFromMessageId: serverChat.branchFromMessageId,
+      branches: serverChat.branches,
+      updatedAt: new Date(serverChat.updatedAt),
+      lastSyncedAt: new Date()
+    })
+    
+    // Merge messages
+    const messagesChanged = await this.mergeMessages(serverChat)
+    
+    // Chat metadata was updated, so return true if messages changed or always true for chat update
+    return true || messagesChanged
+  }
+
+  // Merge messages between local and server
+  private static async mergeMessages(serverChat: Chat): Promise<boolean> {
+    let hasChanges = false
     try {
-      // Check Redis cache first
-      console.log('[SYNC DEBUG] Checking Redis cache...')
-      const cached = await redis.hgetall(`sync:${userId}`)
-      console.log('[SYNC DEBUG] Redis cache result:', cached)
-      
-      if (cached.lastSync) {
-        console.log('[SYNC DEBUG] Found cached sync data, returning online status')
-        return {
-          lastSyncTimestamp: new Date(parseInt(cached.lastSync)),
-          pendingChanges: 0, // TODO: Implement pending changes detection
-          isOnline: true
-        }
-      }
-
-      // Fallback to database
-      console.log('[SYNC DEBUG] No cache found, checking database...')
-      const client = await pool.connect()
-      try {
-        const result = await client.query(
-          'SELECT last_sync_timestamp FROM sync_status WHERE user_id = $1',
-          [userId]
-        )
-        console.log('[SYNC DEBUG] Database query result:', result.rows)
-
-        if (result.rows.length > 0) {
-          console.log('[SYNC DEBUG] Found database sync record, returning online status')
-          return {
-            lastSyncTimestamp: new Date(result.rows[0].last_sync_timestamp),
-            pendingChanges: 0,
-            isOnline: true
+      await db.transaction('rw', db.messages, async () => {
+        const localMessages = await db.messages.where('chatId').equals(serverChat.id).toArray()
+        // @ts-ignore wrong type allocation
+        const localMessageMap = new Map(localMessages.map(m => [m.id, m]))
+        
+        for (const serverMessage of serverChat.messages) {
+          try {
+            const localMessage: Message = localMessageMap.get(serverMessage.id) as Message
+            
+            if (!localMessage) {
+              // New message from server
+              const messageWithChatId = {
+                ...serverMessage,
+                chatId: serverChat.id,
+                timestamp: new Date(serverMessage.timestamp),
+                createdAt: new Date(serverMessage.createdAt),
+                updatedAt: new Date(serverMessage.updatedAt)
+              }
+              await db.messages.add(messageWithChatId)
+              console.log(`[SYNC] Added new message ${serverMessage.id} from server`)
+              hasChanges = true
+            } else {
+              // Check if server message is newer
+              const localUpdated = new Date(localMessage.updatedAt)
+              const serverUpdated = new Date(serverMessage.updatedAt)
+              
+              if (serverUpdated > localUpdated) {
+                // Update local message with server data
+                await db.messages.update(serverMessage.id, {
+                  content: serverMessage.content,
+                  attachments: serverMessage.attachments,
+                  position: serverMessage.position,
+                  updatedAt: new Date(serverMessage.updatedAt)
+                })
+                console.log(`[SYNC] Updated message ${serverMessage.id} from server`)
+                hasChanges = true
+              }
+            }
+          } catch (messageError) {
+            console.error(`[SYNC] Error processing message ${serverMessage.id}:`, messageError)
+            // Continue with other messages
           }
         }
-
-        console.log('[SYNC DEBUG] No sync record found, creating initial sync record...')
-         
-         // Create initial sync record for new users
-         const now = new Date()
-         await client.query(
-           'INSERT INTO sync_status (user_id, last_sync_timestamp, created_at, updated_at) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO NOTHING',
-           [userId, now, now, now]
-         )
-         
-         // Also cache in Redis
-         await redis.hset(`sync:${userId}`, {
-           lastSync: now.getTime().toString(),
-           updatedAt: now.getTime().toString()
-         })
-         
-         console.log('[SYNC DEBUG] Created initial sync record, returning online status')
-         return {
-           lastSyncTimestamp: now,
-           pendingChanges: 0,
-           isOnline: true
-         }
-      } finally {
-        client.release()
-      }
+      })
     } catch (error) {
-      console.error('[SYNC DEBUG] Error getting sync status:', error)
+      console.error(`[SYNC] Error merging messages for chat ${serverChat.id}:`, error)
+      throw error
+    }
+    return hasChanges
+  }
+
+  // Get sync status
+  static async getSyncStatus(userId: string): Promise<SyncStatus> {
+    const settings = this.getSyncSettings()
+    
+    if (this.isServer()) {
+      // Server-side status check
+      try {
+        const client = await pool.connect()
+        try {
+          const result = await client.query(
+            'SELECT last_sync_timestamp FROM sync_status WHERE user_id = $1',
+            [userId]
+          )
+          
+          const lastSync = result.rows.length > 0 
+            ? new Date(result.rows[0].last_sync_timestamp)
+            : new Date(0)
+          
+          return {
+            lastSyncTimestamp: lastSync,
+            pendingChanges: 0,
+            isOnline: true,
+            syncEnabled: settings.enabled
+          }
+        } finally {
+          client.release()
+        }
+      } catch (error) {
+        console.error('[SYNC] Error getting server sync status:', error)
+        return {
+          lastSyncTimestamp: new Date(0),
+          pendingChanges: 0,
+          isOnline: false,
+          syncEnabled: settings.enabled
+        }
+      }
+    } else {
+      // Client-side status
+      let pendingChanges = 0
+      
+      if (chatService && db) {
+        try {
+          // Count chats that haven't been synced or have been updated since last sync
+          const allChats = await chatService.getAllChats()
+          pendingChanges = allChats.filter((chat: Chat) => {
+            if (!chat.lastSyncedAt) return true
+            return new Date(chat.updatedAt) > new Date(chat.lastSyncedAt)
+          }).length
+        } catch (error) {
+          console.error('[SYNC] Error counting pending changes:', error)
+        }
+      }
+      
       return {
-        lastSyncTimestamp: new Date(0),
-        pendingChanges: 0,
-        isOnline: false
+        lastSyncTimestamp: new Date(), // TODO: Track last successful sync
+        pendingChanges,
+        isOnline: navigator.onLine,
+        syncEnabled: settings.enabled
       }
     }
   }
 
-  // Perform full bidirectional sync
+  // Manual full sync
   static async performFullSync(userId: string): Promise<void> {
+    if (this.isServer()) {
+      throw new Error('performFullSync must be called on the client side')
+    }
+    
+    const settings = this.getSyncSettings()
+    if (!settings.enabled) {
+      throw new Error('Sync is disabled')
+    }
+    
+    console.log('[SYNC] Starting full sync')
+    
     try {
-      // Check if user has local chats
-      const localChats = await chatService.getAllChats()
+      // First download from server to get latest changes
+      await this.downloadFromServer(userId)
       
-      if (localChats.length === 0) {
-        // New user or empty local storage - prioritize downloading from server
-        console.log('[SYNC] No local chats found, downloading from server first')
-        await this.syncFromServer(userId)
-        await this.syncToServer(userId)
-      } else {
-        // Existing user - upload local changes first, then download
-        console.log('[SYNC] Local chats found, uploading to server first')
-        await this.syncToServer(userId)
-        await this.syncFromServer(userId)
+      // Then upload any local changes
+      if (settings.autoUpload) {
+        await this.uploadAllChats(userId)
       }
       
-      console.log(`Full sync completed for user: ${userId}`)
+      console.log('[SYNC] Full sync completed')
     } catch (error) {
-      console.error('Sync failed:', error)
+      console.error('[SYNC] Full sync failed:', error)
       throw error
     }
   }
 
-  // Auto-sync on app startup
-  static async autoSync(userId: string): Promise<void> {
-    // This method can be called on both client and server
-    // On client, it only handles local operations
-    if (!this.isServer() && (!chatService || !db)) {
-      console.warn('[SYNC] Client-side database not available for autoSync')
-      return
-    }
-    if (!userId) {
-      console.log('[SYNC DEBUG] No userId provided for auto-sync')
-      return
-    }
-
-    try {
-      console.log('[SYNC DEBUG] Starting auto-sync for user:', userId)
-      
-      // Test database connections
-      await this.testConnections()
-      
-      const status = await this.getSyncStatus(userId)
-      console.log('[SYNC DEBUG] Current sync status:', status)
-      
-      const now = new Date()
-      const timeSinceLastSync = now.getTime() - status.lastSyncTimestamp.getTime()
-      const tenSeconds = 10 * 1000 // Reduced to 10 seconds for better responsiveness
-
-      console.log('[SYNC DEBUG] Time since last sync:', timeSinceLastSync, 'ms (threshold:', tenSeconds, 'ms)')
-
-      // Only sync if it's been more than 10 seconds since last sync
-      if (timeSinceLastSync > tenSeconds) {
-        console.log('[SYNC DEBUG] Triggering full sync...')
-        await this.performFullSync(userId)
-        console.log('[SYNC DEBUG] Full sync completed successfully')
-      } else {
-        console.log('[SYNC DEBUG] Skipping sync - too recent')
+  // Upload all local chats
+  private static async uploadAllChats(userId: string): Promise<void> {
+    if (!chatService) return
+    
+    const allChats = await chatService.getAllChats()
+    const chatsToUpload = allChats.filter((chat: Chat) => {
+      if (!chat.lastSyncedAt) return true
+      return new Date(chat.updatedAt) > new Date(chat.lastSyncedAt)
+    })
+    
+    console.log(`[SYNC] Uploading ${chatsToUpload.length} modified chats`)
+    
+    for (const chat of chatsToUpload) {
+      try {
+        await this.uploadChatToServer(chat.id, userId)
+      } catch (error) {
+        console.error(`[SYNC] Failed to upload chat ${chat.id}:`, error)
       }
-    } catch (error) {
-      console.error('[SYNC DEBUG] Auto-sync failed:', error)
-      // Don't throw error for auto-sync failures
     }
   }
 
-  // Test database connections for debugging
-  static async testConnections(): Promise<void> {
+  // Update sync timestamp on server
+  static async updateSyncTimestamp(userId: string): Promise<void> {
+    if (!this.isServer()) {
+      console.warn('[SYNC] updateSyncTimestamp should only be called on server')
+      return
+    }
+
     try {
-      // Test PostgreSQL connection
-      const client = await pool.connect()
-      console.log('[SYNC DEBUG] PostgreSQL connection: OK')
-      client.release()
+      const now = new Date().toISOString()
       
-      // Test Redis connection
-      await redis.ping()
-      console.log('[SYNC DEBUG] Redis connection: OK')
+      // Update Redis cache
+      if (redis) {
+        await redis.set(`sync:timestamp:${userId}`, now)
+        console.log(`[SYNC] Updated sync timestamp for user ${userId}`)
+      }
     } catch (error) {
-      console.error('[SYNC DEBUG] Database connection failed:', error)
+      console.error('[SYNC] Failed to update sync timestamp:', error)
       throw error
     }
+  }
+
+  // Delete chat from server
+  static async deleteChatFromServer(chatId: string): Promise<void> {
+    if (this.isServer()) return
+    
+    try {
+      const response = await fetch(`/api/sync/delete-chat?chatId=${encodeURIComponent(chatId)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(`Failed to delete chat from server: ${errorData.error || response.statusText}`)
+      }
+
+      const result = await response.json()
+      console.log('Chat deleted from server:', result)
+    } catch (error) {
+      console.error('Error deleting chat from server:', error)
+      throw error
+    }
+  }
+
+  // Cleanup method
+  static cleanup(): void {
+    this.stopAutoSync()
+    this.pendingUploads.clear()
+    this.isInitialized = false
   }
 }
 

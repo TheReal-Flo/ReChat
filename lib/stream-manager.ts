@@ -17,6 +17,7 @@ export interface StreamState {
   lastActivity: number
   position: number
   apiKey?: string
+  memoryEnabled?: boolean
 }
 
 export interface StreamStatus {
@@ -41,7 +42,8 @@ export class StreamManager {
     userId: string,
     modelId: string,
     messages: Message[],
-    apiKey?: string
+    apiKey?: string,
+    memoryEnabled?: boolean
   ): Promise<string> {
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
@@ -57,7 +59,8 @@ export class StreamManager {
       startTime: Date.now(),
       lastActivity: Date.now(),
       position: 0,
-      apiKey
+      apiKey,
+      memoryEnabled
     }
 
     // Store stream state in Redis with TTL

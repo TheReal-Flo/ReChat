@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
-
 import { ClerkProvider } from '@clerk/nextjs'
+import ConvexClientProvider from '../components/providers/convex-provider'
 
 export const metadata: Metadata = {
   title: 'ReChat',
@@ -16,7 +16,17 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-        <body>{children}</body>
+        <head>
+          <script
+            crossOrigin="anonymous"
+            src="//unpkg.com/react-scan/dist/auto.global.js"
+          />
+        </head>
+        <body>
+          <ConvexClientProvider>
+            {children}
+          </ConvexClientProvider>
+        </body>
       </html>
     </ClerkProvider>
   )

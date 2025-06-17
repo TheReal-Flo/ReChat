@@ -3,6 +3,8 @@
 # dependencies
 /node_modules
 
+TODO.md
+
 # next.js
 /.next/
 /out/
@@ -26,3 +28,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Million Lint
+.million

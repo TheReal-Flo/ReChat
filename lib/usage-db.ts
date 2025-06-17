@@ -12,17 +12,19 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379')
 
 // Premium models (Claude models and image generation)
 const PREMIUM_MODELS = [
-  'gpt-4',
-  'gpt-4-turbo',
-  'claude-3-opus',
-  'claude-3-sonnet',
+  "claude-3.5-sonnet",
+  "claude-3-haiku",
+  "claude-3-opus",
+  "claude-3.7-sonnet",
+  "claude-sonnet-4",
+  "claude-opus-4",
   'gpt-image-1'
 ]
 
 // Default usage limits (can be overridden per user)
 const DEFAULT_USAGE_LIMITS = {
-  TOTAL_MESSAGES: 0,
-  PREMIUM_MESSAGES: 0
+  TOTAL_MESSAGES: 100,
+  PREMIUM_MESSAGES: 2
 }
 
 // Time windows (in seconds)
@@ -121,6 +123,14 @@ export class UsageTracker {
           timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         
+        CREATE TABLE IF NOT EXISTS user_memories (
+          id SERIAL PRIMARY KEY,
+          user_id VARCHAR(255) UNIQUE NOT NULL,
+          memory_content TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
         CREATE INDEX IF NOT EXISTS idx_message_logs_user_timestamp ON message_logs(user_id, timestamp);
         
         -- Chat sync tables
@@ -213,11 +223,17 @@ export class UsageTracker {
     
     // Check limits using user-specific limits
     if (totalMessages >= limits.totalLimit) {
-      return { canSend: false, reason: `Monthly limit of ${limits.totalLimit} messages reached` }
+      return { 
+        canSend: false, 
+        reason: `You have reached your monthly limit of ${limits.totalLimit} messages. Your usage will reset at the beginning of next month. To continue chatting, you can either wait for the reset or upgrade your plan for higher limits.` 
+      }
     }
-    
+
     if (isPremium && premiumMessages >= limits.premiumLimit) {
-      return { canSend: false, reason: `Monthly limit of ${limits.premiumLimit} premium messages reached` }
+      return { 
+        canSend: false, 
+        reason: `You have reached your monthly limit of ${limits.premiumLimit} premium model messages. Your usage will reset at the beginning of next month. You can still use standard models or upgrade your plan for higher premium limits.` 
+      }
     }
     
     return { canSend: true }
@@ -293,6 +309,45 @@ export class UsageTracker {
     await pipe.exec()
   }
 
+  // Memory management methods
+  static async getUserMemory(userId: string): Promise<string | null> {
+    const client = await pool.connect()
+    try {
+      const result = await client.query(`
+        SELECT memory_content FROM user_memories
+        WHERE user_id = $1
+      `, [userId])
+      
+      return result.rows.length > 0 ? result.rows[0].memory_content : null
+    } catch (error) {
+      console.error('Error getting user memory:', error)
+      return null
+    } finally {
+      client.release()
+    }
+  }
+  
+  static async setUserMemory(userId: string, memoryContent: string): Promise<boolean> {
+    const client = await pool.connect()
+    try {
+      await client.query(`
+        INSERT INTO user_memories (user_id, memory_content, updated_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id) 
+        DO UPDATE SET 
+          memory_content = $2,
+          updated_at = CURRENT_TIMESTAMP
+      `, [userId, memoryContent])
+      
+      return true
+    } catch (error) {
+      console.error('Error setting user memory:', error)
+      return false
+    } finally {
+      client.release()
+    }
+  }
+  
   // Get user usage stats from database
   static async getUserUsageFromDB(userId: string): Promise<UsageStats> {
     const client = await pool.connect()

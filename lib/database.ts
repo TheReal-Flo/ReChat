@@ -15,6 +15,14 @@ export class ChatDatabase extends Dexie {
       chats: 'id, title, timestamp, parentChatId',
       messages: 'id, chatId, content, role, timestamp, position'
     })
+    this.version(3).stores({
+      chats: 'id, title, timestamp, parentChatId, createdAt, updatedAt, lastSyncedAt',
+      messages: 'id, chatId, content, role, timestamp, position, createdAt, updatedAt'
+    })
+    this.version(4).stores({
+      chats: 'id, title, timestamp, parentChatId, createdAt, updatedAt, lastSyncedAt, pinned',
+      messages: 'id, chatId, content, role, timestamp, position, createdAt, updatedAt'
+    })
   }
 }
 
@@ -37,7 +45,15 @@ export const chatService = {
       })
     )
     
-    return chatsWithMessages
+    // Sort chats: pinned chats first, then by timestamp
+    return chatsWithMessages.sort((a, b) => {
+      // If one is pinned and the other isn't, pinned comes first
+      if (a.pinned && !b.pinned) return -1
+      if (!a.pinned && b.pinned) return 1
+      
+      // If both have same pinned status, sort by timestamp (newest first)
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    })
   },
 
   // Get a specific chat by ID
@@ -63,14 +79,17 @@ export const chatService = {
 
   // Create a new chat
   async createChat(title: string, parentChatId?: string, branchFromMessageId?: string): Promise<Chat> {
+    const now = new Date()
     const newChat: Chat = {
       id: crypto.randomUUID(),
       title,
-      timestamp: new Date(),
+      timestamp: now,
       messages: [],
       parentChatId,
       branchFromMessageId,
-      branches: []
+      branches: [],
+      createdAt: now,
+      updatedAt: now
     }
     
     await db.chats.add(newChat)
@@ -80,7 +99,11 @@ export const chatService = {
       const parentChat = await this.getChatById(parentChatId)
       if (parentChat) {
         const updatedBranches = [...(parentChat.branches || []), newChat.id]
-        await db.chats.update(parentChatId, { branches: updatedBranches })
+        const updateTime = new Date()
+        await db.chats.update(parentChatId, { 
+          branches: updatedBranches,
+          updatedAt: updateTime
+        })
       }
     }
     
@@ -95,13 +118,16 @@ export const chatService = {
       position = existingMessages.length
     }
     
+    const now = new Date()
     const message: Message = {
       id: crypto.randomUUID(),
       content,
       role,
-      timestamp: new Date(),
+      timestamp: now,
       attachments,
-      position
+      position,
+      createdAt: now,
+      updatedAt: now
     }
     
     // Add chatId for database storage (extend the interface for internal use)
@@ -110,7 +136,11 @@ export const chatService = {
     await db.messages.add(messageWithChatId)
     
     // Update chat timestamp
-    await db.chats.update(chatId, { timestamp: new Date() })
+    const updateTime = new Date()
+    await db.chats.update(chatId, { 
+      timestamp: updateTime,
+      updatedAt: updateTime
+    })
     
     return message
   },
@@ -125,14 +155,25 @@ export const chatService = {
 
   // Update chat title
   async updateChatTitle(id: string, title: string): Promise<void> {
-    await db.chats.update(id, { title })
+    const updateTime = new Date()
+    await db.chats.update(id, { 
+      title,
+      updatedAt: updateTime
+    })
   },
 
   // Update message content
   async updateMessage(chatId: string, messageId: string, content: string): Promise<void> {
-    await db.messages.update(messageId, { content })
+    const updateTime = new Date()
+    await db.messages.update(messageId, { 
+      content,
+      updatedAt: updateTime
+    })
     // Update chat timestamp
-    await db.chats.update(chatId, { timestamp: new Date() })
+    await db.chats.update(chatId, { 
+      timestamp: updateTime,
+      updatedAt: updateTime
+    })
   },
 
   // Search chats by title
@@ -232,5 +273,21 @@ export const chatService = {
     
     // Update chat timestamp
     await db.chats.update(chatId, { timestamp: new Date() })
+  },
+
+  // Delete a specific message
+  async deleteMessage(messageId: string): Promise<void> {
+    await db.messages.delete(messageId)
+  },
+
+  // Toggle pin status of a chat
+  async togglePinChat(chatId: string): Promise<void> {
+    const chat = await this.getChatById(chatId)
+    if (!chat) throw new Error('Chat not found')
+    
+    await db.chats.update(chatId, { 
+      pinned: !chat.pinned,
+      updatedAt: new Date()
+    })
   }
 }

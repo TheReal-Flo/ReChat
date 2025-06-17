@@ -40,12 +40,8 @@ export async function DELETE(request: NextRequest) {
         { status: 401 }
       )
     }
-
-    // This is an admin function - you might want to add admin role check here
-    // For now, users can reset their own usage (useful for testing)
-    await UsageTracker.resetUserUsage(userId)
     
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: false })
   } catch (error) {
     console.error('Usage reset API error:', error)
     return NextResponse.json(

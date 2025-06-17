@@ -1,16 +1,17 @@
+import React, { memo, useState } from 'react'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useState } from 'react'
 import { StreamingCodeBlock } from './SyntaxHighlighter'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight, Brain } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface MarkdownMessageProps {
   content: string
   className?: string
 }
 
-export function MarkdownMessage({ content, className = '' }: MarkdownMessageProps) {
+const MarkdownMessage = memo(function MarkdownMessage({ content, className = '' }: MarkdownMessageProps) {
   const [showThinking, setShowThinking] = useState(false)
   
   // Extract thinking blocks and regular content
@@ -83,7 +84,7 @@ export function MarkdownMessage({ content, className = '' }: MarkdownMessageProp
       );
     },
     pre: ({ children }) => (
-      <pre className="bg-gray-800 p-3 rounded-lg overflow-x-auto mb-3">
+      <pre className="bg-gray-800 p-3 rounded-lg overflow-x-auto mb-3 max-w-full">
         {children}
       </pre>
     ),
@@ -122,7 +123,7 @@ export function MarkdownMessage({ content, className = '' }: MarkdownMessageProp
       </a>
     ),
     table: ({ children }) => (
-      <div className="overflow-x-auto mb-3">
+      <div className="overflow-x-auto mb-3 max-w-full">
         <table className="min-w-full border border-gray-600 rounded-lg">
           {children}
         </table>
@@ -165,7 +166,7 @@ export function MarkdownMessage({ content, className = '' }: MarkdownMessageProp
   }
 
   return (
-    <div className={className + " max-w-full"}>
+    <div className={`w-full min-w-0 bg-gradient-to-br from-gray-800/50 to-gray-900/50 rounded-2xl rounded-tl-md p-4 border border-gray-700/50 shadow-lg backdrop-blur-sm glow-border-blue transition-all duration-200 ${className}`}>
       {/* Thinking toggle button - only show if there's thinking content */}
       {thinkingContent && (
         <Button
@@ -186,14 +187,16 @@ export function MarkdownMessage({ content, className = '' }: MarkdownMessageProp
       
       {/* Thinking content - collapsible */}
       {thinkingContent && showThinking && (
-      <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg">
-          <div className="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wide">Reasoning Process</div>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={markdownComponents}
-          >
-            {thinkingContent}
-          </ReactMarkdown>
+      <div className="mb-4 p-4 bg-gray-800 border border-gray-700 rounded-lg max-w-full min-w-0 overflow-hidden">
+          <div className="text-xs text-gray-400 mb-2 font-medium uppercase">Reasoning Process</div>
+          <div className="max-w-full min-w-0 overflow-x-auto">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
+              {thinkingContent}
+            </ReactMarkdown>
+          </div>
         </div>
       )}
       
@@ -208,4 +211,6 @@ export function MarkdownMessage({ content, className = '' }: MarkdownMessageProp
       )}
     </div>
   )
-}
+})
+
+export { MarkdownMessage }

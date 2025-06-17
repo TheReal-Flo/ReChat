@@ -64,6 +64,9 @@ export function useResumableStream(options: UseResumableStreamOptions = {}) {
         headers['x-openrouter-api-key'] = apiKey
       }
 
+      // Get memory setting from localStorage
+      const memoryEnabled = localStorage.getItem('memory_enabled') !== 'false'
+      
       const response = await fetch('/api/stream/start', {
         method: 'POST',
         headers,
@@ -71,7 +74,8 @@ export function useResumableStream(options: UseResumableStreamOptions = {}) {
           chatId,
           messageId,
           modelId,
-          messages
+          messages,
+          memoryEnabled
         })
       })
 
@@ -119,6 +123,7 @@ export function useResumableStream(options: UseResumableStreamOptions = {}) {
       setStreamState(prev => ({
         ...prev,
         streamId,
+        content: '', // Clear content when resuming
         status: 'streaming',
         isStreaming: true,
         error: null
