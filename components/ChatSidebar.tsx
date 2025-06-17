@@ -107,7 +107,7 @@ const ChatSidebar = memo(function ChatSidebar({
                 >
                   <div className="flex items-center gap-1 text-sm font-medium text-white truncate max-w-[70%]">
                     {chat.pinned && <Pin className="h-3 w-3 text-teal-400 flex-shrink-0" />}
-                    <TypewriterText text={chat.title} speed={30} />
+                    <TypewriterText text={chat.title} speed={30} enableTypewriter={false} />
                   </div>
                   <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button
@@ -147,7 +147,7 @@ const ChatSidebar = memo(function ChatSidebar({
                     >
                       <div className="flex items-center gap-1 text-sm text-gray-300 truncate max-w-[70%]">
                         {chat.pinned && <Pin className="h-3 w-3 text-teal-400 flex-shrink-0" />}
-                        <TypewriterText text={chat.title} speed={30} />
+                        <TypewriterText text={chat.title} speed={30} enableTypewriter={false} />
                       </div>
                       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button

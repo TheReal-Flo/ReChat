@@ -14,6 +14,7 @@ interface ChatMessagesProps {
   selectedChat: Chat | null
   isStreaming: boolean
   isSending: boolean
+  streamingMessage?: string
   messageInput: string
   setMessageInput: (message: string) => void
   selectedModel: string
@@ -29,6 +30,7 @@ const ChatMessages = memo(function ChatMessages({
   selectedChat, 
   isStreaming, 
   isSending,
+  streamingMessage,
   messageInput, 
   setMessageInput, 
   selectedModel, 
@@ -282,17 +284,30 @@ const ChatMessages = memo(function ChatMessages({
             </div>
           )}
           
-          {/* Loading Animation for Streaming */}
+          {/* Streaming Message Display */}
           {isStreaming && (
-            <div className="flex justify-start">
-              <div className="max-w-[90%] space-y-4">
-                <div className="text-gray-300 flex items-center gap-2">
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                    <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                    <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce"></div>
+            <div className="flex justify-start group max-w-full">
+              <div className="max-w-[80%] space-y-4">
+                {streamingMessage ? (
+                  <div className="relative">
+                    <MarkdownMessage 
+                      content={streamingMessage} 
+                      className=""
+                    />
+                    {/* Typing indicator */}
+                    <div className="inline-flex items-center ml-1">
+                      <div className="w-1 h-4 bg-teal-400 animate-pulse"></div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="text-gray-300 flex items-center gap-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                      <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                      <div className="w-2 h-2 bg-teal-400 rounded-full animate-bounce"></div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
