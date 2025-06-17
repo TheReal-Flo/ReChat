@@ -208,10 +208,12 @@ export default function HybridChatInterface({ initialChatId }: HybridChatInterfa
     if (targetChat && targetChat.id !== selectedChat?.id) {
       setSelectedChat(targetChat);
       
-      // Update URL if necessary
-      if (shouldUpdateUrl) {
-        router.replace(`/chat/${targetChat.id}`);
-      }
+      // Update URL if necessary and if the path actually needs changing
+      const currentPath = window.location.pathname;
+      const targetPath = `/chat/${targetChat.id}`;
+      // if (shouldUpdateUrl && currentPath !== targetPath) {
+      //   router.replace(targetPath);
+      // }
     }
   }, [chats, selectedChat?.id, initialChatId, router]);
   
