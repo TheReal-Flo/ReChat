@@ -378,7 +378,7 @@ export const generateTitle = action({
     } catch (error) {
       console.error('Failed to generate title:', error);
       // Return a default title if generation fails
-      const defaultTitle = args.firstMessage.slice(0, 50) + (args.firstMessage.length > 50 ? '...' : '');
+      const defaultTitle = args.firstMessage.slice(0, 15) + (args.firstMessage.length > 15 ? '...' : '');
       
       await ctx.runMutation(api.chats.updateChat, {
         chatId: args.chatId,
