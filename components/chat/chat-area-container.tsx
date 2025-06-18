@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useRouter } from "next/navigation";
 import { useChatService } from '../../hooks/use-convex-feature';
@@ -35,6 +35,7 @@ export function ChatAreaContainer({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState("");
+
   const [showBranches, setShowBranches] = useState(false);
   const [branches, setBranches] = useState<Chat[]>([]);
   const [parentChat, setParentChat] = useState<Chat | undefined>(undefined);
@@ -42,7 +43,16 @@ export function ChatAreaContainer({
   
   // Convex hooks (only used when Convex is enabled)
   const convexSelectedChatData = ConvexChatService.useGetChat(
-    isConvexEnabled && selectedChatId ? selectedChatId as Id<"chats"> : undefined
+    isConvexEnabled && selectedChatId ? selectedChatId as Id<"chats"> : undefined,
+    isConvexEnabled ? userId : undefined
+  );
+  const convexBranches = ConvexChatService.useGetChatBranches(
+    isConvexEnabled && selectedChatId ? selectedChatId as Id<"chats"> : undefined,
+    isConvexEnabled ? userId : undefined
+  );
+  const convexParentChat = ConvexChatService.useGetParentChat(
+    isConvexEnabled && selectedChatId ? selectedChatId as Id<"chats"> : undefined,
+    isConvexEnabled ? userId : undefined
   );
   const chatOperations = useChatOperations(isConvexEnabled ? userId : undefined);
   
@@ -68,7 +78,7 @@ export function ChatAreaContainer({
     return selectedChat;
   }, [selectedChat, isConvexEnabled, messages, convexSelectedChatData?.title]);
   
-  // Load selected model from localStorage on mount
+  // Load selected model and brainrot mode from localStorage on mount
   useEffect(() => {
     const storedModel = localStorage.getItem('selectedModel');
     console.log('Loading model from localStorage:', storedModel);
@@ -76,6 +86,9 @@ export function ChatAreaContainer({
       console.log('Setting model to:', storedModel);
       setSelectedModel(storedModel);
     }
+    
+
+    
     setIsModelLoaded(true);
   }, []);
   
@@ -91,31 +104,97 @@ export function ChatAreaContainer({
   useEffect(() => {
     if (!selectedChatId) {
       setSelectedChat(null);
+      setBranches([]);
+      setParentChat(undefined);
       return;
     }
     
     const loadChat = async () => {
       if (isConvexEnabled) {
         // For Convex, create a basic chat object - messages will be loaded via hooks
-        setSelectedChat({ id: selectedChatId, title: 'Loading...', messages: [] });
+        const now = new Date();
+        setSelectedChat({ 
+          id: selectedChatId, 
+          title: 'Loading...', 
+          messages: [], 
+          timestamp: now,
+          createdAt: now,
+          updatedAt: now
+        });
+        
+        // Handle branches for Convex
+        if (convexBranches) {
+          setBranches(convexBranches.map(ConvexChatService.convertConvexChatToChat));
+        } else {
+          setBranches([]);
+        }
+        
+        // Handle parent chat for Convex
+        if (convexParentChat) {
+          setParentChat(ConvexChatService.convertConvexChatToChat(convexParentChat));
+        } else {
+          setParentChat(undefined);
+        }
       } else {
         // For legacy system, load the full chat with messages
         try {
           const chatWithMessages = await chatService.getChatById(selectedChatId);
           if (chatWithMessages) {
             setSelectedChat(chatWithMessages);
+            
+            // Load branches
+            try {
+              const chatBranches = await chatService.getChatBranches(selectedChatId);
+              setBranches(chatBranches);
+            } catch (error) {
+              console.error('Failed to load chat branches:', error);
+              setBranches([]);
+            }
+            
+            // Load parent chat if this is a branch
+            if (chatWithMessages.parentChatId) {
+              try {
+                const parent = await chatService.getParentChat(selectedChatId);
+                setParentChat(parent);
+              } catch (error) {
+                console.error('Failed to load parent chat:', error);
+                setParentChat(undefined);
+              }
+            } else {
+              setParentChat(undefined);
+            }
           } else {
-            setSelectedChat({ id: selectedChatId, title: 'Chat not found', messages: [] });
+            const now = new Date();
+            setSelectedChat({
+              id: selectedChatId,
+              title: 'Chat not found',
+              messages: [],
+              timestamp: now,
+              createdAt: now,
+              updatedAt: now
+            });
+            setBranches([]);
+            setParentChat(undefined);
           }
         } catch (error) {
           console.error('Failed to load chat messages:', error);
-          setSelectedChat({ id: selectedChatId, title: 'Error loading chat', messages: [] });
+          const now = new Date();
+          setSelectedChat({ 
+            id: selectedChatId, 
+            title: 'Error loading chat', 
+            messages: [], 
+            timestamp: now,
+            createdAt: now,
+            updatedAt: now
+          });
+          setBranches([]);
+          setParentChat(undefined);
         }
       }
     };
     
     loadChat();
-  }, [selectedChatId, isConvexEnabled]);
+  }, [selectedChatId, isConvexEnabled, convexSelectedChatData, convexBranches, convexParentChat]);
   
   // Debug logging
   useEffect(() => {
@@ -201,35 +280,140 @@ export function ChatAreaContainer({
   // Hook for title generation
   const generateTitleAction = ConvexChatService.useGenerateTitle();
   
-  // Generate AI response using Convex
+  // Generate AI response using Convex with frontend streaming
   const generateAIResponseConvex = useCallback(async (chatId: string, userMessage: string, attachments?: { name: string; type: string; url: string }[]) => {
     if (!userId) return;
+
+    // Get API keys from localStorage
+    const openrouterApiKey = localStorage.getItem('openrouter_api_key');
+    const openaiApiKey = localStorage.getItem('openai_api_key');
+    
+    // Debug logging for frontend API keys
+    console.log('🔑 Frontend API Key Debug:', {
+      hasOpenRouterKey: !!openrouterApiKey,
+      hasOpenAIKey: !!openaiApiKey,
+      openRouterKeyLength: openrouterApiKey?.length || 0,
+      openAIKeyLength: openaiApiKey?.length || 0
+    });
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (openrouterApiKey) {
+      headers['x-openrouter-api-key'] = openrouterApiKey;
+      console.log('✅ Adding OpenRouter API key to headers');
+    }
+    
+    if (openaiApiKey) {
+      headers['x-openai-api-key'] = openaiApiKey;
+      console.log('✅ Adding OpenAI API key to headers');
+    }
     
     try {
       setIsStreaming(true);
+      setStreamingMessage(""); // Reset streaming message
       
-      // Use the Convex action to generate AI response
-      await generateAIResponseAction({
-          chatId: chatId as Id<"chats">,
-          userId: userId,
-          userMessage: userMessage,
+      // Get current chat messages for context
+      const currentChat = selectedChatWithMessages || selectedChat;
+      const contextMessages = currentChat?.messages || [];
+      
+      // Stream directly from the API for real-time frontend updates
+      const response = await fetch('/api/stream', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
           modelId: selectedModel,
-          attachments: attachments,
-        });
+          messages: [
+            ...contextMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content,
+              attachments: msg.attachments
+            })),
+            {
+              role: 'user',
+              content: userMessage,
+              attachments: attachments
+            }
+          ],
+          memoryEnabled: true,
+        }),
+      });
+      
+      if (!response.ok) {
+        // Try to get the actual error message from the response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (parseError) {
+          // If we can't parse the error response, fall back to generic message
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+      }
+      
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+      
+      let assistantMessage = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = new TextDecoder().decode(value);
+        assistantMessage += chunk;
+        
+        // Update streaming message for real-time display
+        setStreamingMessage(assistantMessage);
+      }
+      
+      // Clear streaming message when done
+      setStreamingMessage("");
+      
+      // Now save the complete message to Convex (non-streamed)
+      if (assistantMessage.trim()) {
+        await chatOperations.sendMessage(
+          chatId as Id<"chats">, 
+          assistantMessage.trim(), 
+          "assistant"
+        );
+      }
       
       // The UI will automatically update via Convex reactivity
     } catch (error) {
       console.error('Failed to generate AI response:', error);
+      
+      // Clear streaming message on error
+      setStreamingMessage("");
+      
+      // Provide clearer error messages for common issues
+      let errorMessage = 'Sorry, there was an error generating the AI response.';
+      
+      if (error instanceof Error) {
+        const errorText = error.message;
+        
+        // Check for usage limit errors
+        if (errorText.includes('monthly limit') || errorText.includes('premium limit')) {
+          errorMessage = errorText; // Use the detailed usage limit message
+        } else if (errorText.includes('status: 429')) {
+          errorMessage = 'You have reached your usage limit. Please wait for your monthly reset or upgrade your plan for higher limits.';
+        } else {
+          errorMessage = `Sorry, there was an error generating the AI response: ${errorText}`;
+        }
+      }
+      
       // Add error message to chat
       await chatOperations.sendMessage(
         chatId as Id<"chats">, 
-        `Sorry, there was an error generating the AI response: ${error instanceof Error ? error.message : 'Unknown error'}`, 
+        errorMessage, 
         "assistant"
       );
     } finally {
       setIsStreaming(false);
     }
-  }, [userId, chatOperations, selectedModel, generateAIResponseAction]);
+  }, [userId, chatOperations, selectedModel, selectedChatWithMessages, selectedChat]);
   
   // Generate title using Convex
   const generateTitleConvex = useCallback(async (chatId: string, firstMessage: string) => {
@@ -258,11 +442,35 @@ export function ChatAreaContainer({
       setIsStreaming(true);
       setStreamingMessage(""); // Reset streaming message
       
+      // Get API keys from localStorage
+      const openrouterApiKey = localStorage.getItem('openrouter_api_key');
+      const openaiApiKey = localStorage.getItem('openai_api_key');
+      
+      // Debug logging for frontend API keys
+      console.log('🔑 Frontend API Key Debug:', {
+        hasOpenRouterKey: !!openrouterApiKey,
+        hasOpenAIKey: !!openaiApiKey,
+        openRouterKeyLength: openrouterApiKey?.length || 0,
+        openAIKeyLength: openaiApiKey?.length || 0
+      });
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (openrouterApiKey) {
+        headers['x-openrouter-api-key'] = openrouterApiKey;
+        console.log('✅ Adding OpenRouter API key to headers');
+      }
+      
+      if (openaiApiKey) {
+        headers['x-openai-api-key'] = openaiApiKey;
+        console.log('✅ Adding OpenAI API key to headers');
+      }
+      
       const response = await fetch('/api/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           chatId,
           message: userMessage,
@@ -272,7 +480,14 @@ export function ChatAreaContainer({
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Try to get the actual error message from the response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (parseError) {
+          // If we can't parse the error response, fall back to generic message
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
       }
       
       const reader = response.body?.getReader();
@@ -496,15 +711,56 @@ export function ChatAreaContainer({
   
   // Memoized callback for branch selection
   const handleBranchSelect = useCallback((branch: Chat) => {
-    setSelectedChat(branch);
     router.replace(`/chat/${branch.id}`);
     setShowBranches(false);
   }, [router]);
   
   // Memoized callback for create branch
-  const handleCreateBranch = useCallback(() => {
-    setShowBranches(false);
-  }, []);
+  const handleCreateBranch = useCallback(async (fromMessageId?: string) => {
+    if (!selectedChat || !userId) return;
+    
+    try {
+      if (isConvexEnabled) {
+        // For Convex system, create a branch
+        const lastMessage = messages[messages.length - 1];
+        const branchFromMessageId = fromMessageId || lastMessage?.id;
+        
+        if (!branchFromMessageId) {
+          console.error('No message to branch from');
+          return;
+        }
+        
+        const newBranch = await chatOperations.createBranch(
+          selectedChat.id,
+          branchFromMessageId
+        );
+        
+        // Navigate to the new branch
+        router.replace(`/chat/${newBranch?._id}`);
+      } else {
+        // For legacy system, create a branch
+        const lastMessage = selectedChat.messages[selectedChat.messages.length - 1];
+        const branchFromMessageId = fromMessageId || lastMessage?.id;
+        
+        if (!branchFromMessageId) {
+          console.error('No message to branch from');
+          return;
+        }
+        
+        const newBranch = await chatService.createBranch(
+          selectedChat.id,
+          branchFromMessageId
+        );
+        
+        // Navigate to the new branch
+        router.replace(`/chat/${newBranch.id}`);
+      }
+    } catch (error) {
+      console.error('Failed to create branch:', error);
+    } finally {
+      setShowBranches(false);
+    }
+  }, [selectedChat, userId, isConvexEnabled, router]);
   
   // Memoized callback for showing branches
   const handleShowBranches = useCallback(() => {
@@ -534,12 +790,13 @@ export function ChatAreaContainer({
         isStreaming={isStreaming}
         isSending={isSending}
         streamingMessage={streamingMessage}
+
         messageInput={message}
         setMessageInput={setMessage}
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
         onResendMessage={handleResendMessage}
-        onCreateBranch={handleShowBranches}
+        onCreateBranch={handleCreateBranch}
         user={user}
         handleSendMessage={handleSendMessageCallback}
         handleKeyPress={handleKeyPressCallback}

@@ -56,6 +56,16 @@ export async function POST(request: NextRequest) {
     // Get API keys from request headers or environment
     const customOpenRouterApiKey = request.headers.get('x-openrouter-api-key')
     const customOpenAIApiKey = request.headers.get('x-openai-api-key')
+  
+    // Debug logging for API keys
+    console.log('🔑 API Key Debug:', {
+      hasOpenRouterKey: !!customOpenRouterApiKey,
+      hasOpenAIKey: !!customOpenAIApiKey,
+      openRouterKeyLength: customOpenRouterApiKey?.length || 0,
+      openAIKeyLength: customOpenAIApiKey?.length || 0,
+      userId: userId
+    })
+
     const apiKey = customOpenRouterApiKey || process.env.OPENROUTER_API_KEY
     
     if (!apiKey) {
@@ -81,9 +91,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check usage limits for authenticated users (skip if using custom API key)
-    if (userId && !customOpenRouterApiKey) {
-      const usageCheck = await UsageTracker.checkUsageLimit(userId, modelId)
+    // Check usage limits for authenticated users
+    if (userId) {
+      // For chat messages, only OpenRouter key should bypass usage limits
+      const usingCustomKey = !!customOpenRouterApiKey
+      console.log('🔍 Usage Check Debug:', {
+        userId,
+        modelId,
+        usingCustomKey,
+        hasOpenRouterKey: !!customOpenRouterApiKey,
+        hasOpenAIKey: !!customOpenAIApiKey
+      })
+      const usageCheck = await UsageTracker.checkUsageLimit(userId, modelId, usingCustomKey)
+      console.log('📊 Usage Check Result:', usageCheck)
       if (!usageCheck.canSend) {
         return NextResponse.json(
           { error: usageCheck.reason },
@@ -447,6 +467,17 @@ Remember: Your responses will be rendered with full markdown support, so take ad
                 for (const toolCall of pendingToolCalls) {
                   if (toolCall.function.name === 'generateImage') {
                     try {
+                      // Check premium usage limits before generating image
+                      // Image generation requires OpenAI key, so only skip limits if OpenAI key is provided
+                      if (userId) {
+                        const usingCustomOpenAIKey = !!customOpenAIApiKey
+                        const usageCheck = await UsageTracker.checkUsageLimit(userId, 'gpt-image-1', usingCustomOpenAIKey)
+                        if (!usageCheck.canSend) {
+                          controller.enqueue(encoder.encode(`\n\nSorry, I can't generate an image right now. ${usageCheck.reason}`))
+                          continue
+                        }
+                      }
+                      
                       const args = JSON.parse(toolCall.function.arguments)
                       controller.enqueue(encoder.encode('\n\nGenerating image...'))
                       

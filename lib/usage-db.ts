@@ -23,8 +23,8 @@ const PREMIUM_MODELS = [
 
 // Default usage limits (can be overridden per user)
 const DEFAULT_USAGE_LIMITS = {
-  TOTAL_MESSAGES: 100,
-  PREMIUM_MESSAGES: 2
+  TOTAL_MESSAGES: 20,
+  PREMIUM_MESSAGES: 5
 }
 
 // Time windows (in seconds)
@@ -182,7 +182,16 @@ export class UsageTracker {
   }
 
   // Check if user can send a message
-  static async checkUsageLimit(userId: string, modelId: string): Promise<{ canSend: boolean; reason?: string }> {
+  static async checkUsageLimit(userId: string, modelId: string, usingCustomKey: boolean = false): Promise<{ canSend: boolean; reason?: string }> {
+    console.log('🔧 checkUsageLimit called:', { userId, modelId, usingCustomKey })
+    
+    // Skip usage limits if using custom API key
+    if (usingCustomKey) {
+      console.log('✅ Bypassing usage limits - custom API key detected')
+      return { canSend: true };
+    }
+    
+    console.log('⚠️ Proceeding with usage limit check - no custom API key')
     const isPremium = PREMIUM_MODELS.includes(modelId)
     
     // Get user-specific limits

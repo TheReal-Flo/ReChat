@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react'
+import React, { memo, useState, useRef, useEffect } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -42,12 +42,23 @@ const ChatMessages = memo(function ChatMessages({
   user
 }: ChatMessagesProps) {
   const [attachments, setAttachments] = useState<{ name: string; type: string; url: string }[]>([])
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  
+  // Auto-scroll to bottom when streaming message updates
+  useEffect(() => {
+    if (isStreaming && scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]')
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight
+      }
+    }
+  }, [isStreaming, streamingMessage])
 
 
   return (
     <div className="bg-gray-900/80 glass-effect neural-grid p-3 md:p-6 mt-2 ml-1 md:ml-2 mr-1 md:mr-2 rounded-tl-lg rounded-tr-lg flex-1 relative glow-border min-h-0 transition-all duration-300 overflow-hidden">
 
-      <ScrollArea className="h-full pr-4 pb-40 overflow-hidden max-w-full !block">
+      <ScrollArea ref={scrollAreaRef} className="h-full pr-4 pb-40 overflow-hidden max-w-full !block">
         <div className="w-full max-w-full md:max-w-[50%] mx-auto space-y-6 px-2 md:px-0">
           {selectedChat ? (
             selectedChat.messages.length > 0 ? selectedChat.messages.map((msg) => (
@@ -284,21 +295,17 @@ const ChatMessages = memo(function ChatMessages({
             </div>
           )}
           
+
+          
           {/* Streaming Message Display */}
           {isStreaming && (
             <div className="flex justify-start group max-w-full">
               <div className="max-w-[80%] space-y-4">
                 {streamingMessage ? (
-                  <div className="relative">
-                    <MarkdownMessage 
-                      content={streamingMessage} 
-                      className=""
-                    />
-                    {/* Typing indicator */}
-                    <div className="inline-flex items-center ml-1">
-                      <div className="w-1 h-4 bg-teal-400 animate-pulse"></div>
-                    </div>
-                  </div>
+                  <MarkdownMessage 
+                    content={streamingMessage} 
+                    className=""
+                  />
                 ) : (
                   <div className="text-gray-300 flex items-center gap-2">
                     <div className="flex space-x-1">

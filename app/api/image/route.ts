@@ -11,8 +11,8 @@ export async function POST(request: NextRequest) {
     const { prompt, model = 'gpt-image-1', size = 'any', quality = 'low' } = body
     
     // Get API key from request headers or environment
-    const customApiKey = request.headers.get('x-openai-api-key')
-    const apiKey = customApiKey || process.env.OPENAI_API_KEY
+    const customOpenAIApiKey = request.headers.get('x-openai-api-key')
+    const apiKey = customOpenAIApiKey || process.env.OPENAI_API_KEY
     
     if (!apiKey) {
       return NextResponse.json(
@@ -37,10 +37,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check usage limits for authenticated users (skip if using custom API key)
-    // Image generation is considered premium usage
-    if (userId && !customApiKey) {
-      const usageCheck = await UsageTracker.checkUsageLimit(userId, model)
+    // Check usage limits for authenticated users (skip if using custom OpenAI API key)
+    // Image generation is considered premium usage and requires OpenAI key
+    if (userId) {
+      const customOpenAIApiKey = request.headers.get('x-openai-api-key')
+      const usingCustomOpenAIKey = !!customOpenAIApiKey
+      const usageCheck = await UsageTracker.checkUsageLimit(userId, model, usingCustomOpenAIKey)
       if (!usageCheck.canSend) {
         return NextResponse.json(
           { error: usageCheck.reason },
@@ -68,10 +70,10 @@ export async function POST(request: NextRequest) {
       }
       const image_base64 = result.data[0].b64_json;
 
-      // Record usage for authenticated users (skip if using custom API key)
-      if (userId && !customApiKey) {
+      // Record usage for authenticated users (skip if using custom OpenAI API key)
+      if (userId && !customOpenAIApiKey) {
         try {
-          await UsageTracker.recordUsage(userId, model, !!customApiKey)
+          await UsageTracker.recordUsage(userId, model, !!customOpenAIApiKey)
           console.log(`Recorded image generation usage for user ${userId} with model ${model}`)
         } catch (error) {
           console.error('Failed to record usage:', error)

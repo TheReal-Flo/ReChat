@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
-import { Eye, EyeOff, Save, Trash2, Brain } from 'lucide-react'
+import { Eye, EyeOff, Save, Trash2, Brain, Video } from 'lucide-react'
 import { UsageDashboard } from './UsageDashboard'
 import { SyncDashboard } from './SyncDashboard'
 import { AdminDashboard } from './AdminDashboard'
@@ -29,6 +29,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
   const [isLoadingMemory, setIsLoadingMemory] = useState(false)
   const [isDeletingMemory, setIsDeletingMemory] = useState(false)
   const [memoryMessage, setMemoryMessage] = useState('')
+  const [brainrotMode, setBrainrotMode] = useState(false)
 
   // Admin user IDs (should match the ones in the API)
   const ADMIN_USER_IDS: string[] = [
@@ -53,6 +54,11 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     const savedMemoryEnabled = localStorage.getItem('memory_enabled')
     if (savedMemoryEnabled !== null) {
       setMemoryEnabled(savedMemoryEnabled === 'true')
+    }
+    
+    const savedBrainrotMode = localStorage.getItem('brainrot_mode')
+    if (savedBrainrotMode !== null) {
+      setBrainrotMode(savedBrainrotMode === 'true')
     }
     
     // Load user memory
@@ -81,6 +87,11 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     localStorage.setItem('memory_enabled', enabled.toString())
     setMemoryMessage(enabled ? 'Memory enabled' : 'Memory disabled')
     setTimeout(() => setMemoryMessage(''), 3000)
+  }
+
+  const handleBrainrotModeToggle = (enabled: boolean) => {
+    setBrainrotMode(enabled)
+    localStorage.setItem('brainrot_mode', enabled.toString())
   }
 
   const handleDeleteMemory = async () => {
@@ -282,6 +293,23 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
                 <Switch
                   checked={memoryEnabled}
                   onCheckedChange={handleMemoryToggle}
+                  className="data-[state=checked]:bg-teal-600"
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-white flex items-center gap-2">
+                    <Video className="h-4 w-4" />
+                    Brainrot Mode
+                  </Label>
+                  <p className="text-xs text-gray-400">
+                    Play a video while AI responses are loading for maximum brainrot experience.
+                  </p>
+                </div>
+                <Switch
+                  checked={brainrotMode}
+                  onCheckedChange={handleBrainrotModeToggle}
                   className="data-[state=checked]:bg-teal-600"
                 />
               </div>

@@ -190,7 +190,7 @@ export function ChatSidebarContainer({
     
     try {
       if (isConvexEnabled) {
-        await chatOperations.togglePinChat(chatId as Id<"chats">);
+        await chatOperations.toggleChatPin(chatId as Id<"chats">);
         // The UI will automatically update via Convex reactivity
       } else {
         await chatService.togglePinChat(chatId);

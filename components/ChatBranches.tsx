@@ -10,7 +10,7 @@ interface ChatBranchesProps {
   branches: Chat[]
   parentChat?: Chat
   onSelectChat: (chat: Chat) => void
-  onCreateBranch: () => void
+  onCreateBranch: (fromMessageId?: string) => void
 }
 
 export function ChatBranches({
@@ -50,7 +50,7 @@ export function ChatBranches({
         )}
         
         <Button
-          onClick={onCreateBranch}
+          onClick={() => onCreateBranch()}
           className="w-full"
         >
           <GitBranch className="h-3 w-3 mr-2" />

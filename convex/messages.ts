@@ -13,6 +13,15 @@ export const addMessage = mutation({
     attachments: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
+    // Authorization check: ensure the user owns the chat
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.isDeleted) {
+      throw new Error("Chat not found");
+    }
+    if (chat.userId !== args.userId) {
+      throw new Error("Unauthorized: You don't have access to this chat");
+    }
+    
     // Auto-generate position if not provided
     let position = args.position;
     if (position === undefined) {
@@ -48,16 +57,22 @@ export const addMessage = mutation({
 export const updateMessage = mutation({
   args: {
     messageId: v.id("messages"),
+    userId: v.string(),
     content: v.optional(v.string()),
     attachments: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const { messageId, ...updates } = args;
+    const { messageId, userId, ...updates } = args;
     
     // Get the message to update the chat timestamp
     const message = await ctx.db.get(messageId);
-    if (!message) {
+    if (!message || message.isDeleted) {
       throw new Error("Message not found");
+    }
+    
+    // Authorization check: ensure the user owns this message
+    if (message.userId !== userId) {
+      throw new Error("Unauthorized: You don't have access to this message");
     }
     
     // Update the message
@@ -74,12 +89,17 @@ export const updateMessage = mutation({
 
 // Delete message (soft delete)
 export const deleteMessage = mutation({
-  args: { messageId: v.id("messages") },
+  args: { messageId: v.id("messages"), userId: v.string() },
   handler: async (ctx, args) => {
     // Get the message to update the chat timestamp
     const message = await ctx.db.get(args.messageId);
-    if (!message) {
+    if (!message || message.isDeleted) {
       throw new Error("Message not found");
+    }
+    
+    // Authorization check: ensure the user owns this message
+    if (message.userId !== args.userId) {
+      throw new Error("Unauthorized: You don't have access to this message");
     }
     
     // Soft delete the message
@@ -180,12 +200,14 @@ export const generateAIResponse = action({
     userMessage: v.string(),
     modelId: v.optional(v.string()),
     attachments: v.optional(v.any()),
+    keys: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     try {
       // Get chat messages for context
       const chat = await ctx.runQuery(api.chats.getChatWithMessages, {
         chatId: args.chatId,
+        userId: args.userId,
       });
       
       if (!chat) {
@@ -213,6 +235,7 @@ export const generateAIResponse = action({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${process.env.CLERK_SECRET_KEY}`,
           'x-user-id': args.userId,
+          ...args.keys
         },
         body: JSON.stringify({
           modelId: args.modelId || 'gemini-2.0-flash',
@@ -253,6 +276,7 @@ export const generateAIResponse = action({
           // Update existing assistant message
           await ctx.runMutation(api.messages.updateMessage, {
             messageId: assistantMessageId,
+            userId: args.userId,
             content: assistantMessage,
           });
         }
@@ -262,11 +286,27 @@ export const generateAIResponse = action({
     } catch (error) {
       console.error('Failed to generate AI response:', error);
       
+      // Provide clearer error messages for common issues
+      let errorMessage = 'Sorry, there was an error generating the AI response.';
+      
+      if (error instanceof Error) {
+        const errorText = error.message;
+        
+        // Check for usage limit errors
+        if (errorText.includes('monthly limit') || errorText.includes('premium limit')) {
+          errorMessage = errorText; // Use the detailed usage limit message
+        } else if (errorText.includes('API error: 429')) {
+          errorMessage = 'You have reached your usage limit. Please wait for your monthly reset or upgrade your plan for higher limits.';
+        } else {
+          errorMessage = `Sorry, there was an error generating the AI response: ${errorText}`;
+        }
+      }
+      
       // Add error message
        const errorMessageId: any = await ctx.runMutation(api.messages.addMessage, {
         chatId: args.chatId,
         userId: args.userId,
-        content: `Sorry, there was an error generating the AI response: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        content: errorMessage,
         role: 'assistant',
       });
       
@@ -327,6 +367,7 @@ export const generateTitle = action({
         // Update the chat title using Convex mutation
         await ctx.runMutation(api.chats.updateChat, {
           chatId: args.chatId,
+          userId: args.userId,
           title: title,
         });
         
@@ -341,6 +382,7 @@ export const generateTitle = action({
       
       await ctx.runMutation(api.chats.updateChat, {
         chatId: args.chatId,
+        userId: args.userId,
         title: defaultTitle,
       });
       

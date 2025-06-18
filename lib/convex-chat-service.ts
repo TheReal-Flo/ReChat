@@ -1,7 +1,7 @@
-import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
-import { Chat, Message } from "../types/chat";
+import { useMutation, useQuery, useAction } from "convex/react";
+import type { Chat, Message } from "../types/chat";
 
 /**
  * Convex-based chat service that replaces the old PostgreSQL/Redis sync system
@@ -23,20 +23,20 @@ export class ConvexChatService {
   /**
    * Get a specific chat with its messages with real-time updates
    */
-  static useGetChat(chatId: Id<"chats"> | undefined) {
+  static useGetChat(chatId: Id<"chats"> | undefined, userId: string | undefined) {
     return useQuery(
       api.chats.getChatWithMessages,
-      chatId ? { chatId } : "skip"
+      chatId && userId ? { chatId, userId } : "skip"
     );
   }
   
   /**
    * Get messages for a specific chat with real-time updates
    */
-  static useGetChatMessages(chatId: Id<"chats"> | undefined) {
+  static useGetChatMessages(chatId: Id<"chats"> | undefined, userId: string | undefined) {
     return useQuery(
       api.chats.getChatMessages,
-      chatId ? { chatId } : "skip"
+      chatId && userId ? { chatId, userId } : "skip"
     );
   }
   
@@ -103,6 +103,20 @@ export class ConvexChatService {
    */
   static useDeleteMessage() {
     return useMutation(api.messages.deleteMessage);
+  }
+
+  /**
+   * Get branches of a chat
+   */
+  static useGetChatBranches(chatId: Id<"chats"> | undefined, userId: string | undefined) {
+    return useQuery(api.chats.getChatBranches, chatId && userId ? { chatId, userId } : "skip");
+  }
+
+  /**
+   * Get parent chat of a branch
+   */
+  static useGetParentChat(chatId: Id<"chats"> | undefined, userId: string | undefined) {
+    return useQuery(api.chats.getParentChat, chatId && userId ? { chatId, userId } : "skip");
   }
   
   // ============ UTILITY METHODS ============
@@ -179,6 +193,7 @@ export function useChatOperations(userId: string | undefined) {
   const addMessage = ConvexChatService.useAddMessage();
   const updateMessage = ConvexChatService.useUpdateMessage();
   const deleteMessage = ConvexChatService.useDeleteMessage();
+  const createBranchMutation = useMutation(api.chats.createBranch);
   
   const createNewChat = async (title: string, parentChatId?: string, branchFromMessageId?: string) => {
     if (!userId) throw new Error("User ID is required");
@@ -204,39 +219,69 @@ export function useChatOperations(userId: string | undefined) {
   };
   
   const updateChatTitle = async (chatId: Id<"chats">, title: string) => {
+    if (!userId) throw new Error("User ID is required");
     return await updateChat({
       chatId,
+      userId,
       title,
     });
   };
   
   const updateChatBranches = async (chatId: Id<"chats">, branches: string[]) => {
+    if (!userId) throw new Error("User ID is required");
     return await updateChat({
       chatId,
+      userId,
       branches,
     });
   };
   
   const editMessage = async (messageId: Id<"messages">, content: string, attachments?: any) => {
+    if (!userId) throw new Error("User ID is required");
     return await updateMessage({
       messageId,
+      userId,
       content,
       attachments,
     });
   };
   
   const removeChatPermanently = async (chatId: Id<"chats">) => {
-    return await deleteChat({ chatId });
+    if (!userId) throw new Error("User ID is required");
+    return await deleteChat({ chatId, userId });
   };
   
   const removeMessage = async (messageId: Id<"messages">) => {
-    return await deleteMessage({ messageId });
+    if (!userId) throw new Error("User ID is required");
+    return await deleteMessage({ messageId, userId });
   };
   
   const toggleChatPin = async (chatId: Id<"chats">) => {
-    return await togglePinChat({ chatId });
+    if (!userId) throw new Error("User ID is required");
+    return await togglePinChat({ chatId, userId });
   };
-  
+
+  const createBranch = async (parentChatId: string, fromMessageId: string, newTitle?: string) => {
+    return await createBranchMutation({
+      parentChatId: parentChatId as Id<"chats">,
+      fromMessageId: fromMessageId as Id<"messages">,
+      userId: userId!,
+      newTitle,
+    });
+  };
+
+  const getChatBranches = async (chatId: string) => {
+    // For Convex, we'll need to handle this differently since hooks can't be called in async functions
+    // This will be handled at the component level
+    throw new Error("getChatBranches for Convex should be handled at component level using hooks");
+  };
+
+  const getParentChat = async (chatId: string) => {
+    // For Convex, we'll need to handle this differently since hooks can't be called in async functions
+    // This will be handled at the component level
+    throw new Error("getParentChat for Convex should be handled at component level using hooks");
+  };
+
   return {
     createNewChat,
     sendMessage,
@@ -245,7 +290,10 @@ export function useChatOperations(userId: string | undefined) {
     editMessage,
     removeChatPermanently,
     removeMessage,
-    togglePinChat: toggleChatPin,
+    toggleChatPin: toggleChatPin,
+    createBranch,
+    getChatBranches,
+    getParentChat,
   };
 }
 
